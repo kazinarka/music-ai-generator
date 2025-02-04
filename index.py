@@ -62,38 +62,48 @@ async def start(update: Update, context: CallbackContext):
 
     await update.message.reply_text("Chose the option:", reply_markup=reply_markup)
 
-def generate_audio_by_prompt(prompt):
-    #Generates audio on the current Suno account.
+async def generate_audio_by_prompt(prompt):
+
     url = f"{SUNO_API_SERVERS[current_server_index]}/api/generate"
     payload = {"prompt": prompt, "make_instrumental": False, "wait_audio": False}
 
-    try:
-        response = requests.post(url, json=payload, headers={'Content-Type': 'application/json'})
-        if response.status_code == 200:
-            return response.json()
-    except requests.RequestException as e:
-        logger.error(f"❌ Error during generation: {e}")
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.post(url, json=payload, headers={'Content-Type': 'application/json'}) as response:
+                if response.status == 200:
+                    return await response.json()
+                else:
+                    logger.error(f"❌ Помилка генерації аудіо: {response.status}")
+        except aiohttp.ClientError as e:
+            logger.error(f"❌ Помилка запиту під час генерації: {e}")
     return None
 
-def get_audio_information(audio_ids):
+async def get_audio_information(audio_ids):
     url = f"{SUNO_API_SERVERS[current_server_index]}/api/get?ids={audio_ids}"
-    try:
-        response = requests.get(url)
-        if response.status_code == 200:
-            audio_info = response.json()
-            return audio_info
-    except requests.RequestException as e:
-        logger.error(f"❌ Error receiving audio : {e}")
+
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(url) as response:
+                if response.status == 200:
+                    audio_info = await response.json()
+                    return audio_info
+        except aiohttp.ClientError as e:
+            logger.error(f"❌ Error receiving audio : {e}")
     return None
 
 async def download_audio(url: str, file_path: str):
-   #Downloads an audio file by URL and saves it locally
+    # Downloads an audio file by URL and saves it locally
     async with aiohttp.ClientSession() as session:
-        async with session.get(url) as response:
-            if response.status != 200:
-                raise Exception(f"Error loading audio: {response.status}")
-            async with aiofiles.open(file_path, 'wb') as file:
-                await file.write(await response.read())
+        try:
+            async with session.get(url) as response:
+                if response.status != 200:
+                    raise Exception(f"Error loading audio: {response.status}")
+                async with aiofiles.open(file_path, 'wb') as file:
+                    await file.write(await response.read())
+        except aiohttp.ClientError as e:
+            logger.error(f"❌ Error downloading audio: {e}")
+        except Exception as e:
+            logger.error(f"❌ Unexpected error while downloading: {e}")
 
 
 # 🔹 Variable to store the number of user requests per day
@@ -139,19 +149,22 @@ async def check_suno_limit():
     for _ in range(len(SUNO_API_SERVERS)):
         url = f"{get_active_server()}/api/get_limit"
         try:
-            response = requests.get(url, timeout=5)
-            if response.status_code == 200:
-                credits_left = response.json().get("credits_left", 0)
-                logger.info(f"📊 Credits {get_active_server()}: {credits_left} limit")
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=5) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        credits_left = data.get("credits_left", 0)
+                        logger.info(f"📊 Credits {get_active_server()}: {credits_left} limit")
 
-                if credits_left > 0:
-                    return True
-                else:
-                    logger.warning(f"❌ No credits for {get_active_server()}. Switching the server...")
-            else:
-                logger.error(f"⚠️ Error getting Suno API limit ({get_active_server()}): {response.status_code}")
+                        if credits_left > 0:
+                            return True
+                        else:
+                            logger.warning(f"❌ No credits for {get_active_server()}. Switching the server...")
+                    else:
+                        logger.error(f"⚠️ Error getting Suno API limit ({get_active_server()}): {response.status_code}")
 
-        except requests.RequestException as e:
+
+        except aiohttp.ClientError as e:
             logger.error(f"❌ Error connecting to Suno API ({get_active_server()}): {e}")
 
         switch_server()
@@ -227,58 +240,66 @@ async def handle_message(update: Update, context: CallbackContext):
 
     elif context.user_data.get('waiting_for_prompt', False):
         context.user_data['waiting_for_prompt'] = False
-        message = await update.message.reply_text("⏳ Song generation...")
 
-        # Song generation
-        audio_data = generate_audio_by_prompt(text)
-        if not audio_data:
-            await message.edit_text("❌ Error generating music.")
-            return
-
-        audio_ids = ",".join([str(item["id"]) for item in audio_data])
-
-        elapsed_time = 0
-        while elapsed_time < 300:
-            audio_info = get_audio_information(audio_ids)
-            if audio_info and audio_info[0]["status"] == 'streaming':
-                audio_url = audio_info[0].get("audio_url")
-                song_title = audio_info[0].get("title", "Unknown_Title")
+        asyncio.create_task(process_song_generation(update, context, text))
 
 
-                song_title = song_title.replace(" ", "_").replace("/", "_").replace("\\", "_").replace("?", "").replace(
-                    "*", "").replace(":", "_")
+async def process_song_generation(update: Update, context: CallbackContext, prompt: str):
 
-                if not audio_url:
-                    await message.edit_text("❌ Could not get audio.")
+    user_id = update.message.from_user.id
+    message = await update.message.reply_text("⏳ Song generation...")
+
+
+    audio_data = await generate_audio_by_prompt(prompt)
+    if not audio_data:
+        await message.edit_text("❌ Error generating music.")
+        return
+
+    audio_ids = ",".join([str(item["id"]) for item in audio_data])
+
+    elapsed_time = 0
+    while elapsed_time < 300:
+        audio_info = await get_audio_information(audio_ids)
+        if audio_info and audio_info[0]["status"] == 'streaming':
+            audio_url = audio_info[0].get("audio_url")
+            song_title = audio_info[0].get("title", "Unknown_Title")
+
+            song_title = song_title.replace(" ", "_").replace("/", "_").replace("\\", "_").replace("?", "").replace(
+                "*", "").replace(":", "_")
+
+            if not audio_url:
+                await message.edit_text("❌ Could not get audio.")
+                return
+
+            file_name = f"{song_title}.mp3"
+            file_path = os.path.join(TEMP_DIR, file_name)
+
+            try:
+                await download_audio(audio_url, file_path)
+
+                if os.path.exists(file_path):
+                    with open(file_path, 'rb') as audio_file:
+                        await update.message.reply_audio(audio=audio_file)
+
+                    add_to_history(user_id, file_path)
                     return
-
-                file_name = f"{song_title}.mp3"
-                file_path = os.path.join(TEMP_DIR, file_name)
-                try:
-                    await download_audio(audio_url, file_path)
-
-                    if os.path.exists(file_path):
-                        with open(file_path, 'rb') as audio_file:
-                            await update.message.reply_audio(audio=audio_file)
-
-                        add_to_history(user_id, file_path)
-                        return
-                    else:
-                        logger.error(f"❌ File not found after download: {file_path}")
-                        await message.edit_text("❌ The generated audio file could not be found.")
-                        return
-                except Exception as e:
-                    logger.error(f"❌ Error sending audio file: {e}")
-                    await message.edit_text("❌ Failed to send audio file.")
+                else:
+                    logger.error(f"❌ File not found after download: {file_path}")
+                    await message.edit_text("❌ The generated audio file could not be found.")
                     return
+            except Exception as e:
+                logger.error(f"❌ Error sending audio file: {e}")
+                await message.edit_text("❌ Failed to send audio file.")
+                return
 
-            if elapsed_time % 30 == 0:
-                await message.edit_text(f"🔄 Still generating...")
+        if elapsed_time % 30 == 0:
+            await message.edit_text(f"🔄 Still generating...")
 
-            await asyncio.sleep(5)
-            elapsed_time += 5
+        await asyncio.sleep(5)
+        elapsed_time += 5
 
-        await message.edit_text("❌ The song was not created in time.")
+    await message.edit_text("❌ The song was not created in time.")
+
 
 
 # 🔹 Launching a bot
