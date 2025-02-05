@@ -246,7 +246,7 @@ async def handle_message(update: Update, context: CallbackContext):
 async def process_song_generation(update: Update, context: CallbackContext, prompt: str):
 
     user_id = update.message.from_user.id
-    message = await update.message.reply_text("⏳ Song generation...")
+    message = await update.message.reply_text("⏳ Song generation... (≈ 2-3 minutes)")
 
 
     audio_data = await generate_audio_by_prompt(prompt)
@@ -296,7 +296,7 @@ async def process_song_generation(update: Update, context: CallbackContext, prom
                 return
 
         if elapsed_time % 30 == 0:
-            await message.edit_text(f"🔄 Still generating...")
+            await message.edit_text(f"🔄 Still generating... (≈ 2-3 minutes)")
 
         await asyncio.sleep(5)
         elapsed_time += 5
