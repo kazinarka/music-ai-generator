@@ -1,0 +1,11 @@
+version: "3.9"
+
+services:
+  bot:
+    build: .
+    container_name: my_python_bot
+    restart: always
+    volumes:
+      - .:/app
+    working_dir: /app
+    command: ["python", "index.py"]
