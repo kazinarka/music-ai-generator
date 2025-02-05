@@ -73,9 +73,9 @@ async def generate_audio_by_prompt(prompt):
                 if response.status == 200:
                     return await response.json()
                 else:
-                    logger.error(f"❌ Помилка генерації аудіо: {response.status}")
+                    logger.error(f"❌ Audio  generation error: {response.status}")
         except aiohttp.ClientError as e:
-            logger.error(f"❌ Помилка запиту під час генерації: {e}")
+            logger.error(f"❌ Error during song generation: {e}")
     return None
 
 async def get_audio_information(audio_ids):
