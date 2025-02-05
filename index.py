@@ -124,7 +124,6 @@ async def check_and_update_limit(update: Update, context: CallbackContext):
         await update.message.reply_text(f"❌ You have reached your limit for today ({USER_DAILY_LIMIT} songs).")
         return False
 
-    user_limits[user_id]["count"] += 1
     return True
 
 
@@ -282,6 +281,10 @@ async def process_song_generation(update: Update, context: CallbackContext, prom
                         await update.message.reply_audio(audio=audio_file)
 
                     add_to_history(user_id, file_path)
+
+                    user_limits[user_id]["count"] += 1
+                    save_history()
+
                     return
                 else:
                     logger.error(f"❌ File not found after download: {file_path}")
