@@ -255,6 +255,7 @@ async def process_song_generation(update: Update, context: CallbackContext, prom
         return
 
     audio_ids = ",".join([str(item["id"]) for item in audio_data])
+    last_message_text = "⏳ Song generation... (≈ 2-3 minutes)"
 
     elapsed_time = 0
     while elapsed_time < 300:
@@ -296,7 +297,10 @@ async def process_song_generation(update: Update, context: CallbackContext, prom
                 return
 
         if elapsed_time % 30 == 0:
-            await message.edit_text(f"🔄 Still generating... (≈ 2-3 minutes)")
+            new_message_text = f"🔄 Still generating... (≈ 2-3 minutes)"
+            if last_message_text != new_message_text:
+                await message.edit_text(new_message_text)
+                last_message_text = new_message_text
 
         await asyncio.sleep(5)
         elapsed_time += 5
